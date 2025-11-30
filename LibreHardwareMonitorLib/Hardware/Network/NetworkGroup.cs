@@ -160,39 +160,42 @@ internal class NetworkGroup : IGroup, IHardwareChanged
 
     /// <summary>
     /// Determines if a network interface is a physical adapter (not a virtual/filter adapter).
-    /// Filters out NDIS lightweight filters, VirtualBox, VMware, Hyper-V, Docker, and similar.
-    /// Keeps Bluetooth and WiFi adapters.
+    /// Uses language-independent detection methods:
+    /// 1. Must have an IPv4 interface index (NDIS filters don't have one)
+    /// 2. Excludes virtual adapters by checking Description (which is always in English)
+    /// 3. Excludes TAP/TUN adapters (VPNs) by NetworkInterfaceType
     /// </summary>
     private static bool IsPhysicalAdapter(NetworkInterface nic)
     {
-        string name = nic.Name?.ToLowerInvariant() ?? "";
+        // NDIS Lightweight Filter adapters don't have their own IPv4 interface index
+        // This reliably filters out all "-QoS Packet Scheduler-", "-WFP-", etc. adapters
+        try
+        {
+            var ipv4Props = nic.GetIPProperties()?.GetIPv4Properties();
+            if (ipv4Props?.Index == null)
+                return false;
+        }
+        catch
+        {
+            // If we can't get IPv4 properties, it's likely not a usable adapter
+            return false;
+        }
+
+        // NetworkInterfaceType 53 is TAP/TUN adapter (used by VPNs: PIA, OpenVPN, WireGuard, etc.)
+        // This is a proprietary type that .NET doesn't have an enum value for
+        if ((int)nic.NetworkInterfaceType == 53)
+            return false;
+
+        // Check Description (always in English, even on non-English Windows)
         string desc = nic.Description?.ToLowerInvariant() ?? "";
         
-        // Exclude NDIS Lightweight Filter adapters (show as "AdapterName-FilterName-0000")
-        if (name.Contains("-0000") || name.Contains("-qos packet") || 
-            name.Contains("-wfp ") || name.Contains("-native wifi") ||
-            name.Contains("-virtualbox") || name.Contains("-virtual wifi"))
-        {
-            return false;
-        }
-        
-        // Exclude virtual/software adapters by description
-        if (desc.Contains("vmware") || 
-            desc.Contains("virtualbox") || desc.Contains("hyper-v") ||
-            desc.Contains("docker") || desc.Contains("wsl") ||
-            desc.Contains("vethernet") || desc.Contains("tap-") ||
-            desc.Contains("wireguard") ||
-            desc.Contains("teredo") || desc.Contains("isatap") ||
-            desc.Contains("6to4") || desc.Contains("microsoft kernel debug") ||
-            desc.Contains("private internet access") || // PIA VPN
-            desc.Contains("nordvpn") || desc.Contains("expressvpn") ||
-            desc.Contains("surfshark") || desc.Contains("protonvpn"))
-        {
-            return false;
-        }
-        
-        // Exclude by name patterns for virtual/test adapters
-        if (name.StartsWith("lan-verbindung*") || name.Contains("(kerneldebugger)"))
+        // Exclude virtual adapters by description keywords
+        if (desc.Contains("virtual") ||     // Microsoft Wi-Fi Direct Virtual Adapter, VMware, Hyper-V
+            desc.Contains("virtualbox") ||  // VirtualBox Host-Only Ethernet Adapter
+            desc.Contains("vmware") ||      // VMware Network Adapter
+            desc.Contains("hyper-v") ||     // Hyper-V Virtual Ethernet Adapter
+            desc.Contains("docker") ||      // Docker virtual network
+            desc.Contains("wsl"))           // Windows Subsystem for Linux
         {
             return false;
         }
