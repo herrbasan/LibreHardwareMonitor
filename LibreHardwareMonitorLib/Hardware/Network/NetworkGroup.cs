@@ -18,11 +18,13 @@ internal class NetworkGroup : IGroup, IHardwareChanged
 
     private readonly object _updateLock = new();
     private readonly ISettings _settings;
+    private readonly bool _physicalOnly;
     private List<Network> _hardware = [];
 
-    public NetworkGroup(ISettings settings)
+    public NetworkGroup(ISettings settings, bool physicalOnly = false)
     {
         _settings = settings;
+        _physicalOnly = physicalOnly;
         UpdateNetworkInterfaces(settings);
 
         NetworkChange.NetworkAddressChanged += NetworkChange_NetworkAddressChanged;
@@ -108,7 +110,7 @@ internal class NetworkGroup : IGroup, IHardwareChanged
         }
     }
 
-    private static List<NetworkInterface> GetNetworkInterfaces()
+    private List<NetworkInterface> GetNetworkInterfaces()
     {
         int retry = 0;
 
@@ -116,10 +118,17 @@ internal class NetworkGroup : IGroup, IHardwareChanged
         {
             try
             {
-                return NetworkInterface.GetAllNetworkInterfaces()
+                var interfaces = NetworkInterface.GetAllNetworkInterfaces()
                                        .Where(IsDesiredNetworkType)
-                                       .OrderBy(static x => x.Name)
-                                       .ToList();
+                                       .OrderBy(static x => x.Name);
+                
+                if (_physicalOnly)
+                {
+                    // Filter to only physical/real adapters (exclude NDIS filters, virtual, etc.)
+                    return interfaces.Where(IsPhysicalAdapter).ToList();
+                }
+                
+                return interfaces.ToList();
             }
             catch (NetworkInformationException)
             {
@@ -147,5 +156,47 @@ internal class NetworkGroup : IGroup, IHardwareChanged
             default:
                 return true;
         }
+    }
+
+    /// <summary>
+    /// Determines if a network interface is a physical adapter (not a virtual/filter adapter).
+    /// Filters out NDIS lightweight filters, VirtualBox, VMware, Hyper-V, Docker, and similar.
+    /// Keeps Bluetooth and WiFi adapters.
+    /// </summary>
+    private static bool IsPhysicalAdapter(NetworkInterface nic)
+    {
+        string name = nic.Name?.ToLowerInvariant() ?? "";
+        string desc = nic.Description?.ToLowerInvariant() ?? "";
+        
+        // Exclude NDIS Lightweight Filter adapters (show as "AdapterName-FilterName-0000")
+        if (name.Contains("-0000") || name.Contains("-qos packet") || 
+            name.Contains("-wfp ") || name.Contains("-native wifi") ||
+            name.Contains("-virtualbox") || name.Contains("-virtual wifi"))
+        {
+            return false;
+        }
+        
+        // Exclude virtual/software adapters by description
+        if (desc.Contains("vmware") || 
+            desc.Contains("virtualbox") || desc.Contains("hyper-v") ||
+            desc.Contains("docker") || desc.Contains("wsl") ||
+            desc.Contains("vethernet") || desc.Contains("tap-") ||
+            desc.Contains("wireguard") ||
+            desc.Contains("teredo") || desc.Contains("isatap") ||
+            desc.Contains("6to4") || desc.Contains("microsoft kernel debug") ||
+            desc.Contains("private internet access") || // PIA VPN
+            desc.Contains("nordvpn") || desc.Contains("expressvpn") ||
+            desc.Contains("surfshark") || desc.Contains("protonvpn"))
+        {
+            return false;
+        }
+        
+        // Exclude by name patterns for virtual/test adapters
+        if (name.StartsWith("lan-verbindung*") || name.Contains("(kerneldebugger)"))
+        {
+            return false;
+        }
+        
+        return true;
     }
 }

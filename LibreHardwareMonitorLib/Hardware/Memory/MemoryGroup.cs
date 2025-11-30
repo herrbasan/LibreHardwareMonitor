@@ -27,17 +27,26 @@ internal class MemoryGroup : IGroup, IHardwareChanged
     private Exception _lastException;
     private bool _disposed = false;
 
-    public MemoryGroup(ISettings settings)
+    public MemoryGroup(ISettings settings, bool dimmDetection = true)
     {
-        if (DriverManager.Driver is null || !DriverManager.Driver.IsOpen)
+        if (dimmDetection)
         {
-            // Assign implementation of IDriver.
-            DriverManager.Driver = new RAMSPDToolkitDriver();
-            SMBusManager.UseWMI = false;
+            if (DriverManager.Driver is null || !DriverManager.Driver.IsOpen)
+            {
+                // Assign implementation of IDriver.
+                DriverManager.Driver = new RAMSPDToolkitDriver();
+                SMBusManager.UseWMI = false;
+            }
         }
 
         _hardware.Add(new VirtualMemory(settings));
         _hardware.Add(new TotalMemory(settings));
+
+        // Skip DIMM detection if disabled (faster init, no SMBus access)
+        if (!dimmDetection)
+        {
+            return;
+        }
 
         if (DriverManager.Driver == null || !DriverManager.LoadDriver())
         {

@@ -39,11 +39,13 @@ public class Computer : IComputer
     private bool _batteryEnabled;
     private bool _controllerEnabled;
     private bool _cpuEnabled;
+    private bool _dimmDetectionEnabled = true;
     private bool _gpuEnabled;
     private bool _memoryEnabled;
     private bool _motherboardEnabled;
     private bool _networkEnabled;
     private bool _open;
+    private bool _physicalNetworkOnly = false;
     private bool _psuEnabled;
     private SMBios _smbios;
     private bool _storageEnabled;
@@ -197,13 +199,25 @@ public class Computer : IComputer
             if (_open && value != _memoryEnabled)
             {
                 if (value)
-                    Add(new MemoryGroup(_settings));
+                    Add(new MemoryGroup(_settings, _dimmDetectionEnabled));
                 else
                     RemoveType<MemoryGroup>();
             }
 
             _memoryEnabled = value;
         }
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether individual DIMM detection is enabled.
+    /// When false, only Virtual Memory and Total Memory are shown (faster).
+    /// When true, individual DIMM modules with SPD data are detected (slower, ~4s init).
+    /// Default is true for backward compatibility.
+    /// </summary>
+    public bool IsDimmDetectionEnabled
+    {
+        get { return _dimmDetectionEnabled; }
+        set { _dimmDetectionEnabled = value; }
     }
 
     /// <inheritdoc />
@@ -233,13 +247,25 @@ public class Computer : IComputer
             if (_open && value != _networkEnabled)
             {
                 if (value)
-                    Add(new NetworkGroup(_settings));
+                    Add(new NetworkGroup(_settings, _physicalNetworkOnly));
                 else
                     RemoveType<NetworkGroup>();
             }
 
             _networkEnabled = value;
         }
+    }
+
+    /// <summary>
+    /// Gets or sets whether to only detect physical network adapters.
+    /// When true, filters out NDIS filter adapters, virtual adapters (VirtualBox, VMware, Hyper-V, Docker),
+    /// VPN adapters, and other non-physical network interfaces.
+    /// Default is false (all adapters detected) for backward compatibility.
+    /// </summary>
+    public bool IsPhysicalNetworkOnly
+    {
+        get { return _physicalNetworkOnly; }
+        set { _physicalNetworkOnly = value; }
     }
 
     /// <inheritdoc />
@@ -503,7 +529,7 @@ public class Computer : IComputer
             Add(new CpuGroup(_settings));
 
         if (_memoryEnabled)
-            Add(new MemoryGroup(_settings));
+            Add(new MemoryGroup(_settings, _dimmDetectionEnabled));
 
         if (_gpuEnabled)
         {
@@ -528,7 +554,7 @@ public class Computer : IComputer
             Add(new StorageGroup(_settings));
 
         if (_networkEnabled)
-            Add(new NetworkGroup(_settings));
+            Add(new NetworkGroup(_settings, _physicalNetworkOnly));
 
         if (_psuEnabled)
         {
